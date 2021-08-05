@@ -1,17 +1,26 @@
 #!/bin/bash
 
+echo "Check if ipset is intalled (apt install ipset)"
+
+declare -a COUNTRIES
 declare -A PORTS
+########################################################################
+# Countries to block
+COUNTRIES=["cn" "af"]
+
+# Whitelist PORTS & IP 
 # example : PORTS[22]="192.168.1.13,10.10.0.1"
 # example no IP restriction : PORTS[22]="0.0.0.0./0"
+#PORTS[22]=192.168.1.17/32
+#PORTS[5432]=0.0.0.0/0
 
 PORTS[22]="192.168.1.1/24"
 PORTS[5432]="0.0.0.0./0"
 
 # PING 1 or 0
 PING=0
+########################################################################
 
-#PORTS[22]=192.168.1.17/32
-#PORTS[5432]=0.0.0.0/0
 
 IPT=/sbin/iptables
 IP6T=/sbin/ip6tables
@@ -22,6 +31,22 @@ GREEN='\033[1;32m'
 NC='\033[0m' # No Color
 
 do_start() {
+    
+    # Prepare CIDR list
+    echo > blockcountry.sh
+    # Loop for each countries
+	for C in "${COUNTRIES[@]}"
+	do
+    curl -sS --insecure "https://www.ipdeny.com/ipblocks/data/aggregated/${C}-aggregated.zone" >> /tmp/blockcountry.sh
+		printf  "${YELLOW}- ${C} blocked ! ${NC}\n"
+	done
+    
+    sed -i '/^#/d' /tmp/blockcountry.sh
+    sed -i 's/^/ipset add countryblocker /g' /tmp/blockcountry.sh
+    sed  -i '1i ipset create countryblocker nethash' /tmp/blockcountry.sh
+    chmod +x blockcountry.sh
+    bash blockcountry.sh
+    
 	#####################
 	# Delete old rules #
 	#####################
@@ -104,6 +129,10 @@ do_start() {
 	$IPT -A INPUT -p tcp --tcp-flags ALL NONE -j DROP # Drop all incoming malformed NULL packets 
 	$IPT -A INPUT -p tcp ! --syn -m conntrack --ctstate NEW -j DROP # Drop syn-flood attack packets
 	$IPT -A INPUT -p tcp --tcp-flags ALL ALL -j DROP # Drop incoming malformed XMAS packets
+    
+    # Block CIDR for banned countries
+    $IPT -A INPUT -m set --match-set countryblocker src -j DROP
+    
 	printf "${GREEN}Firewall started [OK]${NC}\n"
 
 	# Optional Log 
